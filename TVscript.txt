@@ -67,8 +67,6 @@ if showFVG
 string londonTZ = "Europe/London"
 int startHour   = (activeSession == "London") ? 8  : 14
 int startMinute = (activeSession == "London") ? 0  : 30
-int levelHour   = (activeSession == "London") ? 8  : 15
-int levelMinute = (activeSession == "London") ? 30 : 0
 
 var float asiaHigh = na
 var float asiaLow = na
@@ -94,12 +92,15 @@ if asiaProcessedToday and timeTotal <= (5 * 60 + 55)
     box.set_top(asiaBox, asiaHigh), box.set_bottom(asiaBox, asiaLow), box.set_right(asiaBox, bar_index)
 
 // --- 4. Magenta Levels & Bar Counter ---
+// Start the session counter
 if barHour == startHour and barMinute == startMinute
-    sessionActive := true, barCounter := 1
+    sessionActive := true
+    barCounter := 1
 else if sessionActive
     barCounter += 1
 
-if (barHour == levelHour and barMinute == levelMinute) or (barHour == 20 and barMinute == 0)
+// Draw Magenta Lines on the 2nd bar of the session (or 8:00 PM fallback)
+if (sessionActive and barCounter == 2) or (barHour == 20 and barMinute == 0)
     line.new(bar_index, high, bar_index + lineLength, high, color=lineColor, width=2)
     line.new(bar_index, low, bar_index + lineLength, low, color=lineColor, width=2)
 
