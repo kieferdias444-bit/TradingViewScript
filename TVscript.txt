@@ -1,0 +1,117 @@
+//@version=6
+indicator("Final Multi-Session Pro - All-In-One", overlay=true, max_labels_count=500, max_boxes_count=500)
+
+// --- Inputs ---
+activeSession  = input.string("London", "Active Session", options=["London", "US"])
+lineLength     = input.int(6, "Level Line Length (Bars)", minval=1)
+fvgLength      = input.int(3, "FVG Length (Bars)", minval=1)
+lineColor      = input.color(color.rgb(255, 0, 255), "Levels Color (Magenta)")
+
+gp_tf          = "Thursday-Friday Pattern (Daily Only)"
+showTF         = input.bool(true, "Show TF Signal", group=gp_tf)
+tfLabelText    = input.string("TF GAP POTENTIAL", "TF Label Text", group=gp_tf)
+tfColor        = input.color(color.orange, "TF Label Color", group=gp_tf)
+
+gp_fvg         = "Fair Value Gaps"
+showFVG        = input.bool(true, "Show FVGs", group=gp_fvg)
+mitigationType = input.string("Touch", "Mitigation Type", options=["Touch", "Close"], group=gp_fvg)
+bullFVGColor   = input.color(color.new(color.green, 85), "Bullish FVG", group=gp_fvg)
+bearFVGColor   = input.color(color.new(color.red, 85), "Bearish FVG", group=gp_fvg)
+
+gp_asia        = "Asia Session Box"
+showAsiaBox    = input.bool(true, "Show Asia Box", group=gp_asia)
+asiaBoxColor   = input.color(color.new(color.blue, 90), "Box Fill", group=gp_asia)
+
+gp_db          = "Double Bar Strategy"
+showDB         = input.bool(true, "Show Double Bar Signals", group=gp_db)
+dbLongColor    = input.color(color.green, "DB Long Label", group=gp_db)
+dbShortColor   = input.color(color.red, "DB Short Label", group=gp_db)
+
+gp_counter     = "Bar Counter Settings"
+showCounter    = input.bool(true, "Show Bar Counter", group=gp_counter)
+textColor      = input.color(color.gray, "Counter Text Color", group=gp_counter)
+
+// --- 1. Thursday-Friday Strategy (Gap-Based Detection) ---
+if showTF and timeframe.isdaily
+    timeDiff = time - time[1]
+    oneDay   = 24 * 60 * 60 * 1000
+    isMondayOpen = timeDiff > oneDay * 1.5
+    
+    if isMondayOpen and high[1] < high[2]
+        label.new(bar_index[1], high[1], tfLabelText, color=color.new(tfColor, 100), textcolor=tfColor, style=label.style_label_down, yloc=yloc.abovebar, size=size.small)
+
+// --- 2. FVG Logic (3-Bar Mitigated) ---
+var box[] bullFvgBoxes = array.new_box()
+var box[] bearFvgBoxes = array.new_box()
+
+if showFVG
+    // Detection (Gap between Bar 0 and Bar 2)
+    if low > high[2] 
+        array.push(bullFvgBoxes, box.new(bar_index[2], low, bar_index[2] + fvgLength, high[2], bgcolor=bullFVGColor, border_color=na))
+    if high < low[2]
+        array.push(bearFvgBoxes, box.new(bar_index[2], high, bar_index[2] + fvgLength, low[2], bgcolor=bearFVGColor, border_color=na))
+
+    // Mitigation
+    if array.size(bullFvgBoxes) > 0
+        for i = array.size(bullFvgBoxes) - 1 to 0
+            bId = array.get(bullFvgBoxes, i)
+            if (mitigationType == "Touch" ? low <= box.get_top(bId) : close <= box.get_top(bId))
+                box.delete(array.remove(bullFvgBoxes, i))
+    if array.size(bearFvgBoxes) > 0
+        for i = array.size(bearFvgBoxes) - 1 to 0
+            bId = array.get(bearFvgBoxes, i)
+            if (mitigationType == "Touch" ? high >= box.get_bottom(bId) : close >= box.get_bottom(bId))
+                box.delete(array.remove(bearFvgBoxes, i))
+
+// --- 3. Asia Box & Session Logic ---
+string londonTZ = "Europe/London"
+int startHour   = (activeSession == "London") ? 8  : 14
+int startMinute = (activeSession == "London") ? 0  : 30
+int levelHour   = (activeSession == "London") ? 8  : 15
+int levelMinute = (activeSession == "London") ? 30 : 0
+
+var float asiaHigh = na
+var float asiaLow = na
+var box asiaBox = na
+var bool asiaProcessedToday = false
+var int barCounter = 0
+var bool sessionActive = false
+
+if dayofmonth(time, londonTZ) != dayofmonth(time[1], londonTZ)
+    sessionActive := false, barCounter := 0, asiaHigh := na, asiaLow := na, asiaBox := na, asiaProcessedToday := false
+
+barHour = hour(time, londonTZ), barMinute = minute(time, londonTZ), timeTotal = barHour * 60 + barMinute
+
+// Asia Session Box
+if not asiaProcessedToday and timeTotal >= 0
+    asiaHigh := high, asiaLow := low
+    if showAsiaBox
+        asiaBox := box.new(bar_index, asiaHigh, bar_index, asiaLow, bgcolor=asiaBoxColor, border_color=color.new(color.blue, 50))
+    asiaProcessedToday := true
+
+if asiaProcessedToday and timeTotal <= (5 * 60 + 55)
+    asiaHigh := math.max(high, asiaHigh), asiaLow := math.min(low, asiaLow)
+    box.set_top(asiaBox, asiaHigh), box.set_bottom(asiaBox, asiaLow), box.set_right(asiaBox, bar_index)
+
+// --- 4. Magenta Levels & Bar Counter ---
+if barHour == startHour and barMinute == startMinute
+    sessionActive := true, barCounter := 1
+else if sessionActive
+    barCounter += 1
+
+if (barHour == levelHour and barMinute == levelMinute) or (barHour == 20 and barMinute == 0)
+    line.new(bar_index, high, bar_index + lineLength, high, color=lineColor, width=2)
+    line.new(bar_index, low, bar_index + lineLength, low, color=lineColor, width=2)
+
+if showCounter and sessionActive and barCounter % 2 != 0
+    label.new(bar_index, low, str.tostring(barCounter), textcolor=textColor, color=color.new(color.white, 100), style=label.style_label_up, size=size.small)
+
+// --- 5. Double Bar Strategy ---
+if showDB
+    isBearishDB = (close[1] < open[1]) and (close < open) and (low >= low[1]) and (high <= high[1])
+    isBullishDB = (close[1] > open[1]) and (close > open) and (low >= low[1]) and (high <= high[1])
+
+    if isBearishDB
+        label.new(bar_index, high, "DB", color=color.new(dbShortColor, 100), textcolor=dbShortColor, style=label.style_label_down, yloc=yloc.abovebar, size=size.small)
+    if isBullishDB
+        label.new(bar_index, high, "DB", color=color.new(dbLongColor, 100), textcolor=dbLongColor, style=label.style_label_down, yloc=yloc.abovebar, size=size.small)
